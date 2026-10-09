@@ -1,0 +1,425 @@
+openapi: 3.0.3
+info:
+  title: Bulk Action Platform API
+  version: 1.0.0
+  description: Enterprise-grade, horizontally scalable Bulk Action Platform with modular
+    strategy pattern, Redis sliding-window rate limiting, distributed deduplication,
+    and Celery Beat scheduling.
+paths:
+  /api/bulk-actions/:
+    get:
+      operationId: bulk_actions_list
+      description: List bulk actions with optional filtering by account_id, status,
+        or entity_type.
+      summary: List bulk actions
+      parameters:
+      - in: query
+        name: account_id
+        schema:
+          type: string
+        description: Filter by tenant account identifier
+      - in: query
+        name: entity_type
+        schema:
+          type: string
+        description: Filter by entity type (contact, lead)
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter by status (PENDING, RUNNING, COMPLETED, FAILED, SCHEDULED)
+      tags:
+      - Bulk Actions
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBulkActionDetailList'
+          description: ''
+    post:
+      operationId: bulk_actions_create
+      description: Validates parameters, enforces tenant rate limits (10,000 entities/minute),
+        partitions workload into chunks, and queues Celery tasks.
+      summary: Create a bulk action
+      tags:
+      - Bulk Actions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkActionCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BulkActionCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BulkActionCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkActionDetail'
+          description: ''
+        '400':
+          description: Validation or unsupported entity/action error
+        '429':
+          description: Rate limit exceeded (10,000 entities per minute per tenant)
+  /api/bulk-actions/{id}/:
+    get:
+      operationId: bulk_actions_retrieve
+      description: Retrieve progress percentage, execution status, and counts for
+        a specific bulk action.
+      summary: Retrieve bulk action status & progress
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this bulk action.
+        required: true
+      tags:
+      - Bulk Actions
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkActionDetail'
+          description: ''
+        '404':
+          description: BulkAction not found
+  /api/bulk-actions/{id}/logs/:
+    get:
+      operationId: bulk_actions_logs_list
+      description: Paginated list of record execution logs (filter by ?status=SUCCESS|ERROR|SKIPPED).
+      summary: Get paginated execution logs
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this bulk action.
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter by log status (SUCCESS, ERROR, SKIPPED)
+      tags:
+      - Bulk Actions
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBulkActionLogList'
+          description: ''
+        '404':
+          description: BulkAction not found
+  /api/bulk-actions/{id}/stats/:
+    get:
+      operationId: bulk_actions_stats_retrieve
+      description: Return statistical summary and chunk breakdown for a bulk action.
+      summary: Get bulk action statistics summary
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this bulk action.
+        required: true
+      tags:
+      - Bulk Actions
+      security:
+      - cookieAuth: []
+      - basicAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkActionStats'
+          description: ''
+        '404':
+          description: BulkAction not found
+components:
+  schemas:
+    BulkActionCreateRequest:
+      type: object
+      description: Serializer validating incoming bulk action creation requests.
+      properties:
+        account_id:
+          type: string
+          minLength: 1
+          maxLength: 100
+        entity_type:
+          type: string
+          minLength: 1
+          maxLength: 50
+        action_type:
+          type: string
+          minLength: 1
+          maxLength: 50
+        payload:
+          type: object
+          additionalProperties: {}
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
+        chunk_size:
+          type: integer
+          minimum: 1
+          default: 500
+      required:
+      - account_id
+      - action_type
+      - entity_type
+      - payload
+    BulkActionDetail:
+      type: object
+      description: Serializer representing BulkAction status and progress.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        account_id:
+          type: string
+          maxLength: 100
+        entity_type:
+          type: string
+          maxLength: 50
+        action_type:
+          type: string
+          maxLength: 50
+        payload: {}
+        status:
+          $ref: '#/components/schemas/BulkActionDetailStatusEnum'
+        total_count:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        success_count:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        failure_count:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        skipped_count:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        progress_percentage:
+          type: number
+          format: double
+          readOnly: true
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - account_id
+      - action_type
+      - created_at
+      - entity_type
+      - id
+      - progress_percentage
+      - updated_at
+    BulkActionDetailStatusEnum:
+      enum:
+      - PENDING
+      - SCHEDULED
+      - RUNNING
+      - COMPLETED
+      - FAILED
+      type: string
+      description: |-
+        * `PENDING` - Pending
+        * `SCHEDULED` - Scheduled
+        * `RUNNING` - Running
+        * `COMPLETED` - Completed
+        * `FAILED` - Failed
+    BulkActionLog:
+      type: object
+      description: Serializer for BulkActionLog entries.
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        bulk_action_id:
+          type: string
+          format: uuid
+          readOnly: true
+        entity_id:
+          type: string
+          nullable: true
+          maxLength: 100
+        status:
+          $ref: '#/components/schemas/BulkActionLogStatusEnum'
+        error_message:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - bulk_action_id
+      - created_at
+      - id
+      - status
+    BulkActionLogStatusEnum:
+      enum:
+      - SUCCESS
+      - ERROR
+      - SKIPPED
+      type: string
+      description: |-
+        * `SUCCESS` - Success
+        * `ERROR` - Error
+        * `SKIPPED` - Skipped
+    BulkActionStats:
+      type: object
+      description: Serializer for bulk action statistical summary.
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        total_count:
+          type: integer
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        skipped_count:
+          type: integer
+        progress_percentage:
+          type: number
+          format: double
+        chunks:
+          type: object
+          additionalProperties:
+            type: integer
+          readOnly: true
+      required:
+      - chunks
+      - failure_count
+      - id
+      - progress_percentage
+      - skipped_count
+      - status
+      - success_count
+      - total_count
+    PaginatedBulkActionDetailList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkActionDetail'
+    PaginatedBulkActionLogList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkActionLog'
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

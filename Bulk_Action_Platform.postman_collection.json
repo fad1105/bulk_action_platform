@@ -1,0 +1,352 @@
+{
+  "info": {
+    "_postman_id": "9b12a84c-3f2d-419b-a7e1-8f9d0c64b590",
+    "name": "Bulk Action Platform API",
+    "description": "Comprehensive Postman collection for the Bulk Action Platform CRM backend.\nDemonstrates bulk updates, entity-agnostic dispatching, rate limiting, deduplication, scheduling, and logging.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "actionId",
+      "value": "e305e608-d306-4b89-a2e6-a052ff6b7e52",
+      "type": "string"
+    },
+    {
+      "key": "accountId",
+      "value": "tenant_123",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Bulk Actions",
+      "item": [
+        {
+          "name": "Create Bulk Action (Immediate Execution - Contact)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.id) {",
+                  "    pm.collectionVariables.set(\"actionId\", jsonData.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_id\": \"{{accountId}}\",\n  \"entity_type\": \"contact\",\n  \"action_type\": \"bulk_update\",\n  \"payload\": {\n    \"entity_ids\": [1, 2, 3, 4, 5],\n    \"fields\": {\n      \"status\": \"archived\",\n      \"age\": 35\n    }\n  },\n  \"chunk_size\": 500\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bulk-actions/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bulk-actions",
+                ""
+              ]
+            },
+            "description": "Trigger an immediate bulk update on the Contact entity. Automatically partitioned into 500-record chunks and dispatched to Celery workers."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Bulk Action (Entity-Agnostic Demo - Lead)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.id) {",
+                  "    pm.collectionVariables.set(\"actionId\", jsonData.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_id\": \"{{accountId}}\",\n  \"entity_type\": \"lead\",\n  \"action_type\": \"bulk_update\",\n  \"payload\": {\n    \"entity_ids\": [1, 2],\n    \"fields\": {\n      \"source\": \"LinkedIn Inbound Campaign\",\n      \"status\": \"qualified\"\n    }\n  },\n  \"chunk_size\": 500\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bulk-actions/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bulk-actions",
+                ""
+              ]
+            },
+            "description": "Demonstrates the entity-agnostic architecture executing a bulk update on the Lead model with zero custom view logic."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Bulk Action (Scheduled for Future)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "var jsonData = pm.response.json();",
+                  "pm.test(\"Status is SCHEDULED\", function () {",
+                  "    pm.expect(jsonData.status).to.eql(\"SCHEDULED\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_id\": \"tenant_enterprise\",\n  \"entity_type\": \"contact\",\n  \"action_type\": \"bulk_update\",\n  \"payload\": {\n    \"entity_ids\": [10, 11, 12],\n    \"fields\": {\n      \"status\": \"active\"\n    }\n  },\n  \"chunk_size\": 500,\n  \"scheduled_at\": \"2026-11-22T23:15:00Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/bulk-actions/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bulk-actions",
+                ""
+              ]
+            },
+            "description": "Saves an action in SCHEDULED status without dispatching immediate Celery tasks. Celery Beat periodic task inspects due actions and dispatches them at the exact timestamp."
+          },
+          "response": []
+        },
+        {
+          "name": "List Bulk Actions (Filtered)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bulk-actions/?account_id={{accountId}}&status=COMPLETED&entity_type=contact",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bulk-actions",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "account_id",
+                  "value": "{{accountId}}",
+                  "description": "Filter by tenant account identifier"
+                },
+                {
+                  "key": "status",
+                  "value": "COMPLETED",
+                  "description": "Filter by status (PENDING, RUNNING, COMPLETED, FAILED, SCHEDULED)"
+                },
+                {
+                  "key": "entity_type",
+                  "value": "contact",
+                  "description": "Filter by CRM entity type"
+                }
+              ]
+            },
+            "description": "Retrieves paginated list of all bulk actions with status and progress filters."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bulk Action Status & Progress",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bulk-actions/{{actionId}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bulk-actions",
+                "{{actionId}}",
+                ""
+              ]
+            },
+            "description": "Fetches real-time status, counters (total_count, success_count, failure_count, skipped_count), and computed progress_percentage."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bulk Action Statistics Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bulk-actions/{{actionId}}/stats/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bulk-actions",
+                "{{actionId}}",
+                "stats",
+                ""
+              ]
+            },
+            "description": "Returns statistical summary including overall completion progress and chunk-level breakdown (total, completed, failed, running, pending)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Bulk Action Execution Logs (Paginated & Filtered)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/bulk-actions/{{actionId}}/logs/?status=SKIPPED&page=1&page_size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "bulk-actions",
+                "{{actionId}}",
+                "logs",
+                ""
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "SKIPPED",
+                  "description": "Filter by log status: SUCCESS, ERROR, or SKIPPED"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "page_size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Retrieves entity-level audit logs with pagination and status filtering (e.g. inspecting duplicate emails skipped or specific error messages)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Documentation & Schema",
+      "item": [
+        {
+          "name": "OpenAPI 3.0 Schema (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/schema/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "schema",
+                ""
+              ]
+            },
+            "description": "Raw OpenAPI 3.0 specification exported by drf-spectacular."
+          },
+          "response": []
+        },
+        {
+          "name": "Swagger UI Interactive Docs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/docs/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "docs",
+                ""
+              ]
+            },
+            "description": "Interactive Swagger UI documentation page."
+          },
+          "response": []
+        },
+        {
+          "name": "Redoc Interactive Docs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/redoc/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "redoc",
+                ""
+              ]
+            },
+            "description": "Redoc responsive API reference documentation."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
